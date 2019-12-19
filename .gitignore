@@ -134,4 +134,4 @@ dmypy.json
 scrapper/*
 
 # Ignore csv files
-players/*
+*.csv
