@@ -1,30 +1,18 @@
 from selenium import webdriver
 
 from pymongo import MongoClient
+import sys, os
+import time
 import re
+
+import pandas as pd
+from bs4 import BeautifulSoup
 
 home = 'https://stats.nba.com/players/list/?Historic=Y'
 
 browser = webdriver.Chrome(executable_path="./chromedriver")
 
 browser.get(home)
-
-# Player structure example to insert in mongodb
-# player = {
-#     'id': '76001'
-#     'name': 'Alaa Abdelnaby',
-#     'position': 'F',
-#     'Carrer Regular Season Stats': [
-#         {
-#             'SEASON': '1994-95',
-#             'TEAM': 'SAC',
-#             'AGE': '27',
-#             ...
-#         }
-#     ],
-#     'Carrer Playoffs Stats': [],
-#     'Carrer League Ranking Stats': []
-# }
 
 # Connects and create db and collections
 conn = MongoClient('localhost', 27017)
@@ -33,49 +21,86 @@ players_collection = db.players
 
 print('Searching players IDs...')
 # Gets every player id on the page
-player_documents = []
 players_list = browser.find_elements_by_xpath("//li[@class='players-list__name']//a")
+links_list = []
 for player_item in players_list:
-    links_list.append(player_item.get_attribute('href').replace('/player/'))
+	links_list.append(player_item.get_attribute('href'))
 
 print('Searching players data...')
 # Iterate over the players ID list to access his respective page and get all info
-try:
-    for link in links_list:
-        player = {}
-        # Access his page
-        browser.get(link)
-        # Get player name and format it for the folder name
-        name = browser.find_elements_by_xpath('//div[@class="player-summary__player-name"]')
-        player['name'] = ' '.join(name[0].text.split('\n'))
-        # Find the table where all the statistics tables are
-        stats_tables = browser.find_elements_by_xpath('//nba-stat-table')
-        # Iterate over each table and create your own csv file
-        table = []
-        for index_table, stats_table in enumerate(stats_tables):
-            table = []
-            # Get the table name
-            caption_item = stats_table.find_elements_by_xpath('.//div[@class="nba-stat-table__caption"]')
-            caption = 'Table'+str(index_table) if len(caption_item) == 0 else caption_item[0].text
-            player[caption] = []
-            # Get the columns names
-            head = []
-            col_list = stats_table.find_elements_by_xpath('.//div[@class="nba-stat-table__overflow"]/table/thead/tr/th')
-            # Get the values of each row
-            row_list = stats_table.find_elements_by_xpath('.//div[@class="nba-stat-table__overflow"]/table/tbody/tr')
-            for index_row, row in enumerate(row_list):
-                body = {}
-                body_col_list = row.find_elements_by_xpath('.//td')
-                for index_col, row_col in enumerate(body_col_list):
-                    body[col_list[index_col].text] = row_col.text
-                table.append(body)
-        
-        player_documents.append(table)
-except:
-    print(player_documents)
-    #players_collection.insert_many(player_documents)
+player = {}
 
-#players_collection.insert_many(player_documents)
+# Player structure example to insert in mongodb
+# player = {
+# 	'id': '76001',
+# 	'name': 'Alaa Abdelnaby',
+# 	'position': 'F'
+# 	'stats': {
+# 			'Carrer Regular Season Stats': [
+# 			{
+# 				'SEASON': '1994-95',
+# 				'TEAM': 'SAC',
+# 				'AGE': '27',
+# 				...
+# 			}
+# 		],
+# 		'Carrer Playoffs Stats': [],
+# 		'Carrer League Ranking Stats': []
+# 	}
+# }
+
+try:
+	for link in links_list:
+		player_id = re.sub(r"[a-zA-Z\W]", "", link)
+
+		if players_collection.find({'id': player_id}).limit(1).count() == 0:
+			player = {
+				'id': player_id,
+				'stats': {}
+			}
+			# Access his page
+			browser.get(f'{link}?SeasonType=Regular%20Season')
+			# Get player name and format it for the folder name
+			name = browser.find_elements_by_xpath('//div[@class="player-summary__player-name"]')
+			position = browser.find_elements_by_xpath('//span[@ng-if="playerInfo.POSITION_INITIALS"]')
+			player['name'] = ' '.join(name[0].text.split('\n'))
+			player['position'] = position[0].text if len(position) > 0 else ''
+
+			# Find the table where all the statistics tables are
+			soup = BeautifulSoup(browser.page_source, 'lxml')
+			tables = soup.findAll('nba-stat-table')
+
+			# Check if tables are already loaded
+			while len(tables) == 0:
+				print('not loaded yet')
+				soup = BeautifulSoup(browser.page_source, 'lxml')
+				tables = soup.findAll('nba-stat-table')
+				time.sleep(0.5)
+			
+			# get tables names
+			caption_item = browser.find_elements_by_xpath('.//div[@class="nba-stat-table__caption"]')
+
+			# Convert tables to dataframe and then from dataframe to json to save on mongodb
+			for index, table in enumerate(tables):
+				df = pd.read_html(table.prettify())
+
+				json_stats = df[0].to_dict(orient='records')
+
+				player['stats'][caption_item[index].text] = json_stats
+			
+			if len(player['stats']) <= 2:
+				print(f'{player["name"]} Status:')
+				print(player['stats'])
+				print(f'--------------------------------------------')
+				print('')
+
+			players_collection.insert(player)
+except Exception as e:
+	exc_type, exc_obj, exc_tb = sys.exc_info()
+	fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
+	print(exc_type, fname, exc_tb.tb_lineno)
+	print(str(e))
+	print(player)
 
 # Closes the browser
 print('Data colected, closing driver...')
