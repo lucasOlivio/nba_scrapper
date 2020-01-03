@@ -77,9 +77,7 @@ try:
 				print('not loaded yet')
 				time.sleep(1)
 				soup = BeautifulSoup(browser.page_source, 'lxml')
-				tables = soup.findAll('nba-stat-table__overflow')
-
-				print(tables)
+				tables = soup.findAll('nba-stat-table')
 
 				if tries == 5:
 					break
@@ -88,23 +86,14 @@ try:
 			caption_item = browser.find_elements_by_xpath('.//div[@class="nba-stat-table__caption"]')
 
 			# Convert tables to dataframe and then from dataframe to json to save on mongodb
-			if len(tables) == 0:
-				for index, table in enumerate(tables):
-					try:
-						df = pd.read_html(table.prettify())
-					except ValueError:
-						print(table.prettify())
-						exit()
+			for index, table in enumerate(tables):
+				try:
+					df = pd.read_html(table.prettify())
+				except ValueError:
+					print(f'{player_id}: {table.prettify()}')
+				json_stats = df[0].to_dict(orient='records')
 
-					json_stats = df[0].to_dict(orient='records')
-
-					player['stats'][caption_item[index].text] = json_stats
-				
-				if len(player['stats']) <= 2:
-					print(f'{player["name"]} Status:')
-					print(player['stats'])
-					print(f'--------------------------------------------')
-					print('')
+				player['stats'][caption_item[index].text] = json_stats
 
 			players_collection.insert(player)
 except Exception as e:
