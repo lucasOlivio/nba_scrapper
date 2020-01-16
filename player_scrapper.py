@@ -86,12 +86,16 @@ try:
 			caption_item = browser.find_elements_by_xpath('.//div[@class="nba-stat-table__caption"]')
 
 			# Convert tables to dataframe and then from dataframe to json to save on mongodb
+			json_stats = {}
+			df = None
 			for index, table in enumerate(tables):
 				try:
 					df = pd.read_html(table.prettify())
 				except ValueError:
 					print(f'{player_id}: {table.prettify()}')
-				json_stats = df[0].to_dict(orient='records')
+
+				if df:
+					json_stats = df[0].to_dict(orient='records')
 
 				player['stats'][caption_item[index].text] = json_stats
 
@@ -104,5 +108,6 @@ except Exception as e:
 	print(player)
 
 # Closes the browser
+print(len(links_list))
 print('Data colected, closing driver...')
 browser.close()
