@@ -129,9 +129,3 @@ dmypy.json
 .pyre/
 
 # End of https://www.gitignore.io/api/python
-
-# Ignore the virtual env
-scrapper/*
-
-# Ignore csv files
-*.csv
